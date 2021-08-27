@@ -8,9 +8,15 @@ import (
 	"io/ioutil"
 	"net/http"
 	"sync"
+	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 const apiBaseUrl = "https://api.sendpulse.com"
+const limit = 500
+const delay = 25 * time.Millisecond
+const refreshInterval = 1
 
 // SendpulseError represents http error from SendPulse
 type SendpulseError struct {
@@ -50,6 +56,14 @@ func NewClient(client *http.Client, config *Config) *Client {
 		token:     "",
 		tokenLock: new(sync.RWMutex),
 	}
+
+	err := cl.open()
+	if err != nil {
+		return nil
+	}
+
+	go cl.refresher()
+
 	cl.Emails = newEmailsService(cl)
 	cl.Balance = newBalanceService(cl)
 	cl.SMTP = newSmtpService(cl)
@@ -59,7 +73,34 @@ func NewClient(client *http.Client, config *Config) *Client {
 	cl.VkOk = newVkOkService(cl)
 	cl.Bots = newBotsService(cl)
 	cl.Automation360 = newAutomation360Service(cl)
+
 	return cl
+}
+
+func (c *Client) open() error {
+	token, err := c.getToken()
+	if err != nil {
+		return err
+	}
+
+	c.token = token
+
+	return nil
+}
+
+func (c *Client) refresher() {
+	ticker := time.NewTicker(refreshInterval * time.Minute)
+
+	for {
+		select {
+		case t := <-ticker.C:
+			log.Infof("Updating token at %s", t)
+			err := c.open()
+			if err != nil {
+				log.Errorf("Got error while updating: %s", err)
+			}
+		}
+	}
 }
 
 // getToken returns new token to interact with Sendpulse or returns it from stored value if it already exists
@@ -123,13 +164,19 @@ func (c *Client) newRequest(method string, path string, body interface{}, result
 		req.Header.Set("Content-Type", "application/json")
 	}
 
+	// if useToken {
+	// 	token, err := c.getToken()
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
+	// }
+
 	if useToken {
-		token, err := c.getToken()
-		if err != nil {
-			return nil, err
-		}
+		token := c.token
 		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
 	}
+
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, &SendpulseError{http.StatusServiceUnavailable, path, "", err.Error()}
