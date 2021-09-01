@@ -16,7 +16,7 @@ import (
 const apiBaseUrl = "https://api.sendpulse.com"
 const limit = 500
 const delay = 25 * time.Millisecond
-const refreshInterval = 1
+const refreshInterval = 20 // * time.Minutes
 
 // SendpulseError represents http error from SendPulse
 type SendpulseError struct {
